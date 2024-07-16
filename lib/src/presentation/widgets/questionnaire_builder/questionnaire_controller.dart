@@ -1,4 +1,5 @@
 import 'package:fhir/r4.dart';
+import 'package:fhir/r4/r4.dart';
 import 'package:fhir_questionnaire/src/logic/questionnaire_logic.dart';
 import 'package:fhir_questionnaire/src/model/questionnaire_item_bundle.dart';
 import 'package:fhir_questionnaire/src/model/questionnaire_item_enable_when_controller.dart';
@@ -18,6 +19,7 @@ class QuestionnaireController extends ChangeNotifier {
     this.locale,
     this.onSubmit,
     this.overrideQuestionnaireItemMapper,
+    this.signatureImage,
   }) : itemBundles = QuestionnaireLogic.buildQuestionnaireItems(
           questionnaire.item,
           onAttachmentLoaded: onAttachmentLoaded,
@@ -64,6 +66,9 @@ class QuestionnaireController extends ChangeNotifier {
   /// The expected locale to show, by default Platform locale is used.
   final String? locale;
 
+  /// Base64Encode image of user signature
+  String? signatureImage;
+
   /// Necessary callback when Questionnaire has items of type = `attachment`
   /// so the logic of loading an Attachment is handled outside of the logic
   /// of QuestionnaireView
@@ -92,14 +97,54 @@ class QuestionnaireController extends ChangeNotifier {
     return map;
   }
 
+  void setSignatureImage(String base64EncodeImage) {
+    signatureImage = base64EncodeImage;
+    notifyListeners();
+  }
+
+  QuestionnaireResponse _attachSignatureImageToQuestionnaireResponse(
+    QuestionnaireResponse questionnaireResponse,
+  ) {
+    if (signatureImage != null) {
+      final responseSignatureUrl = FhirUri(
+        'http://hl7.org/fhir/StructureDefinition/questionnaireresponse-signature',
+      );
+
+      final extensions = questionnaireResponse.extension_?.toList()
+        ?..removeWhere(
+          (final element) => element.url == responseSignatureUrl,
+        );
+
+      questionnaireResponse = questionnaireResponse.copyWith(
+        extension_: extensions
+          ?..add(
+            FhirExtension(
+              url: FhirUri(responseSignatureUrl),
+              valueAttachment: Attachment(
+                contentType: FhirCode('image/data'),
+                data: FhirBase64Binary(signatureImage),
+              ),
+            ),
+          ),
+      );
+    }
+
+    return questionnaireResponse;
+  }
+
   SubmitResult submit() {
     final SubmitResult submitResult;
     final invalidItems = validate();
 
     if (invalidItems.isEmpty) {
-      final questionnaireResponse = QuestionnaireLogic.generateResponse(
+      QuestionnaireResponse questionnaireResponse =
+          QuestionnaireLogic.generateResponse(
         questionnaire: questionnaire,
         itemBundles: itemBundles,
+      );
+
+      questionnaireResponse = _attachSignatureImageToQuestionnaireResponse(
+        questionnaireResponse,
       );
 
       submitResult = SubmitResult.questionnaireResponse(questionnaireResponse);
